@@ -14,138 +14,177 @@ jobs:
 
     steps:
       - name: Refine issue into a comprehensive Copilot prompt
-        uses: actions/github-script@v7
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
           AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
-        with:
-          script: |
-            const issue = context.payload.issue;
-            const issueTitle = issue.title;
-            const issueBody = issue.body || '(no description provided)';
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import os
+          import urllib.request
+          import urllib.error
 
-            // ---------------------------------------------------------------
-            // Codebase context for York University IT Innovation Team Website
-            // ---------------------------------------------------------------
-            const codebaseContext = `
-            ## Codebase: York University IT Innovation Team Website
+          issue_number = os.environ["ISSUE_NUMBER"]
+          issue_title  = os.environ["ISSUE_TITLE"]
+          issue_body   = os.environ.get("ISSUE_BODY", "(no description provided)")
+          repo_owner   = os.environ["REPO_OWNER"]
+          repo_name    = os.environ["REPO_NAME"]
+          endpoint     = os.environ["AZURE_AI_ENDPOINT"]
+          api_key      = os.environ["AZURE_AI_KEY"]
+          github_token = os.environ["GITHUB_TOKEN"]
 
-            ### What this repo is
-            A static single-page marketing website for the York University IT Innovation Team.
-            No build tools, no frameworks, no package managers — vanilla HTML, CSS, and JavaScript only.
+          # -------------------------------------------------------------------
+          # Codebase context — update this block whenever the site changes
+          # -------------------------------------------------------------------
+          codebase_context = """
+          ## Codebase: York University IT Innovation Team Website
 
-            ### Tech stack
-            - Pure HTML5 (index.html — single page, all sections in one file)
-            - Vanilla CSS (css/styles.css — all styles, no preprocessor)
-            - Vanilla JavaScript (js/main.js — all interactivity)
-            - Font Awesome 6.5 loaded via CDN for icons
-            - No npm, no bundler, no transpiler — files run directly in the browser
+          ### What this repo is
+          A static marketing/informational website for the York University IT Innovation Team.
+          No build tools, no frameworks, no package managers — vanilla HTML, CSS, and JS only.
 
-            ### File structure
-            - index.html — Single-page site, all sections in one file
-            - css/styles.css — All styles (layout, components, animations, responsive)
-            - js/main.js — All interactivity (nav toggle, scroll animations, stats counter, project filter, contact form)
+          ### Tech stack
+          - Pure HTML5 (index.html — single page, all sections in one file)
+          - Vanilla CSS (css/styles.css — all styles, no preprocessor)
+          - Vanilla JavaScript (js/main.js — all interactivity)
+          - Font Awesome 6.5 loaded via CDN for icons
+          - No npm, no bundler, no transpiler — what you see is what the browser runs
 
-            ### Page sections (in order in index.html)
-            1. Header / Navbar — responsive with hamburger menu on mobile (nav-toggle, nav-menu)
-            2. Hero — headline, CTA buttons, animated icon grid (hero-shape elements)
-            3. Stats Banner — animated counters (data-target attribute drives count-up animation)
-            4. About — mission/vision cards with .reveal scroll animation
-            5. Services — 6-card grid with .reveal scroll animation
-            6. Projects — filterable grid (data-category attribute, filter buttons with data-filter)
-            7. Team — cards with avatar icons and social links
-            8. Contact — form with client-side validation (#contact-form) and success message (#form-success)
-            9. Footer — links, social icons, dynamic copyright year (#footer-year)
+          ### File structure
+          - index.html       — Single-page site, all sections
+          - css/styles.css   — All styles (layout, components, animations, responsive)
+          - js/main.js       — All interactivity (nav, scroll, counters, filter, form)
 
-            ### JavaScript behaviour (js/main.js)
-            - Nav toggle: hamburger button toggles nav-menu--open class on #nav-menu
-            - Scroll reveal: IntersectionObserver adds 'revealed' class to elements with .reveal class
-            - Stats counter: counts up from 0 to data-target value when stat enters viewport
-            - Project filter: clicking .filter-btn filters .project-card by data-category, toggling 'hidden' class
-            - Contact form: validates name, email (format), message; shows per-field errors via .form-error spans; shows #form-success on valid submit
+          ### Page sections (in order in index.html)
+          1. Header / Navbar — responsive hamburger menu (nav-toggle, nav-menu)
+          2. Hero — headline, CTA buttons, animated icon grid (hero-shape elements)
+          3. Stats Banner — animated counters (data-target drives count-up animation)
+          4. About — mission/vision cards with .reveal scroll animation
+          5. Services — 6-card grid with .reveal scroll animation
+          6. Projects — filterable grid (data-category, filter buttons with data-filter)
+          7. Team — cards with avatar icons and social links
+          8. Contact — form (#contact-form) with client-side validation and #form-success
+          9. Footer — links, social icons, dynamic copyright year (#footer-year)
 
-            ### CSS conventions
-            - BEM-style class naming: .block, .block__element, .block--modifier
-            - CSS custom properties (variables) on :root for colours, spacing, typography
-            - Mobile-first responsive — base styles for mobile, @media (min-width: ...) for larger screens
-            - Animations use transition and @keyframes — no JS-driven inline styles for animation
-            - York University brand colours: primary red #8B1538, white #FFFFFF, dark #1a1a2e
+          ### JavaScript behaviour (js/main.js)
+          - Nav toggle: hamburger button toggles nav-menu--open class on #nav-menu
+          - Scroll reveal: IntersectionObserver adds 'revealed' class to .reveal elements
+          - Stats counter: counts up from 0 to data-target value when stat enters viewport
+          - Project filter: .filter-btn filters .project-card by data-category (toggles 'hidden')
+          - Contact form: validates name, email (format), message; shows .form-error spans;
+            shows #form-success on valid submit
 
-            ### Conventions to always follow
-            - No external JS libraries — keep it vanilla, no jQuery, no frameworks
-            - No build step — all files must work by opening index.html directly in a browser
-            - Accessibility: all interactive elements need aria-* attributes; icons need aria-label or aria-hidden="true"
-            - New sections use: <section class="section" id="section-name"> with a .container wrapper
-            - New cards/components use .reveal class so they animate in on scroll automatically
-            - Icons come from Font Awesome — use fa-solid, fa-brands class names
-            - No inline <script> or <style> tags in HTML — all JS in js/main.js, all CSS in css/styles.css
-            `;
+          ### CSS conventions
+          - BEM-style class naming: .block, .block__element, .block--modifier
+          - CSS custom properties on :root for colours, spacing, typography
+          - Mobile-first responsive — base styles for mobile, @media (min-width: ...) for larger
+          - York brand colours: primary red #8B1538, white #FFFFFF, dark #1a1a2e
 
-            // ---------------------------------------------------------------
-            // Build the prompt for Claude
-            // ---------------------------------------------------------------
-            const systemPrompt = `You are a senior front-end web developer and technical analyst.
-            Your job is to take a vague GitHub issue and rewrite it as a comprehensive,
-            actionable prompt for an AI coding agent (GitHub Copilot) to implement independently.
+          ### Hard constraints — always follow
+          - No external JS libraries — keep it vanilla, no jQuery, no frameworks
+          - No build step — all files must work by opening index.html directly in a browser
+          - No npm, no node_modules, no package.json
+          """
 
-            The refined prompt must include:
-            1. A clear problem statement
-            2. The specific files to edit (index.html, css/styles.css, js/main.js) with the relevant sections
-            3. Acceptance criteria — what "done" looks like, testable and concrete
-            4. Any edge cases or gotchas (e.g. accessibility, mobile responsiveness, existing JS hooks)
-            5. Constraints to follow (conventions, patterns from the codebase — no frameworks, no inline scripts, BEM CSS, etc.)
+          # -------------------------------------------------------------------
+          # System prompt for Claude
+          # -------------------------------------------------------------------
+          system_prompt = (
+              "You are a senior front-end developer and technical analyst. "
+              "Your job is to take a vague GitHub issue and rewrite it as a comprehensive, "
+              "actionable prompt for an AI coding agent (GitHub Copilot) to implement independently.\n\n"
+              "The refined prompt must include:\n"
+              "1. A clear problem statement\n"
+              "2. The specific files likely involved (index.html, css/styles.css, js/main.js)\n"
+              "3. Acceptance criteria — what 'done' looks like, testable and concrete\n"
+              "4. Any edge cases or gotchas the coding agent should watch out for\n"
+              "5. Constraints to follow (no build tools, no external libraries, vanilla only)\n\n"
+              "Be specific. Reference actual class names, IDs, and file paths from the codebase context. "
+              "Do not add features beyond what was requested. Output only the refined prompt, no preamble."
+          )
 
-            Be specific. Reference actual class names, IDs, and file paths from the codebase context.
-            Do not add features beyond what was requested. Output only the refined prompt, no preamble.`;
+          user_message = (
+              f"Codebase context:\n{codebase_context}\n\n"
+              f"---\n\n"
+              f"Original issue title: {issue_title}\n\n"
+              f"Original issue description:\n{issue_body}\n\n"
+              f"---\n\n"
+              f"Write the refined Copilot prompt now:"
+          )
 
-            const userMessage = `Codebase context:\n${codebaseContext}\n\n---\n\nOriginal issue title: ${issueTitle}\n\nOriginal issue description:\n${issueBody}\n\n---\n\nWrite the refined Copilot prompt now:`;
+          # -------------------------------------------------------------------
+          # Call Claude via Azure AI Foundry (Anthropic-native endpoint)
+          # Auth uses 'api-key' header, body uses Anthropic's native format.
+          # -------------------------------------------------------------------
+          payload = {
+              "model": "claude-3-5-sonnet-20241022",
+              "max_tokens": 1500,
+              "system": system_prompt,
+              "messages": [{"role": "user", "content": user_message}],
+          }
 
-            // ---------------------------------------------------------------
-            // Call Claude via Azure AI Foundry (Anthropic-native endpoint)
-            // ---------------------------------------------------------------
-            const response = await fetch(process.env.AZURE_AI_ENDPOINT, {
-              method: 'POST',
-              headers: {
-                'api-key': process.env.AZURE_AI_KEY,
-                'anthropic-version': '2023-06-01',
-                'content-type': 'application/json',
+          req = urllib.request.Request(
+              endpoint,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "api-key": api_key,
+                  "anthropic-version": "2023-06-01",
+                  "content-type": "application/json",
               },
-              body: JSON.stringify({
-                model: 'claude-3-5-sonnet-20241022',
-                max_tokens: 1500,
-                system: systemPrompt,
-                messages: [{ role: 'user', content: userMessage }],
-              }),
-            });
+              method="POST",
+          )
 
-            if (!response.ok) {
-              const err = await response.text();
-              core.setFailed(`Azure AI Foundry error: ${err}`);
-              return;
-            }
+          try:
+              with urllib.request.urlopen(req) as resp:
+                  data = json.loads(resp.read().decode("utf-8"))
+          except urllib.error.HTTPError as e:
+              print(f"Azure AI Foundry error {e.code}: {e.read().decode('utf-8')}")
+              raise SystemExit(1)
 
-            const data = await response.json();
-            const refinedPrompt = data.content[0].text;
+          refined_prompt = data["content"][0]["text"]
 
-            // ---------------------------------------------------------------
-            // Post the refined prompt as a comment on the issue
-            // ---------------------------------------------------------------
-            const comment = `## 🤖 Copilot Prompt Coach
+          # -------------------------------------------------------------------
+          # Post the refined prompt as a comment on the issue
+          # -------------------------------------------------------------------
+          comment_body = (
+              "## \U0001f916 Copilot Prompt Coach\n\n"
+              "The following is a refined version of this issue, structured to give "
+              "GitHub Copilot all the context it needs to implement a solution.\n\n"
+              "> If anything looks wrong or incomplete, edit the issue description "
+              "before Copilot starts working.\n\n"
+              "---\n\n"
+              + refined_prompt
+              + "\n\n---\n"
+              "*Generated automatically when the `copilot` label was applied.*"
+          )
 
-            The following is a refined version of this issue, structured to give GitHub Copilot all the context it needs to implement a solution.
+          github_url = (
+              f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+              f"/issues/{issue_number}/comments"
+          )
+          comment_req = urllib.request.Request(
+              github_url,
+              data=json.dumps({"body": comment_body}).encode("utf-8"),
+              headers={
+                  "Authorization": f"Bearer {github_token}",
+                  "Accept": "application/vnd.github.v3+json",
+                  "Content-Type": "application/json",
+                  "User-Agent": "prompt-coach-action",
+              },
+              method="POST",
+          )
 
-            > If anything looks wrong or incomplete, edit the issue description before Copilot starts working.
+          try:
+              with urllib.request.urlopen(comment_req) as resp:
+                  print(f"Comment posted — HTTP {resp.status}")
+          except urllib.error.HTTPError as e:
+              print(f"GitHub API error {e.code}: {e.read().decode('utf-8')}")
+              raise SystemExit(1)
 
-            ---
-
-            ${refinedPrompt}
-
-            ---
-            *Generated automatically when the \`copilot\` label was applied.*`;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue.number,
-              body: comment,
-            });
+          PYEOF
