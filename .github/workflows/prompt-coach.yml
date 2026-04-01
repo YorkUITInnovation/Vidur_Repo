@@ -123,7 +123,7 @@ jobs:
           # Auth uses 'api-key' header, body uses Anthropic's native format.
           # -------------------------------------------------------------------
           payload = {
-              "model": "claude-sonnet-4-6",
+              "model": "aura-claude-sonnet-4-6-useast2",
               "max_tokens": 1500,
               "system": system_prompt,
               "messages": [{"role": "user", "content": user_message}],
