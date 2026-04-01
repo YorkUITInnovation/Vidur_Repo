@@ -1,0 +1,151 @@
+name: Copilot Prompt Coach
+
+# Fires when the 'copilot' label is added to an issue
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  refine-prompt:
+    if: github.event.label.name == 'copilot'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write        # needed to post the comment back
+
+    steps:
+      - name: Refine issue into a comprehensive Copilot prompt
+        uses: actions/github-script@v7
+        env:
+          AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
+          AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const issueTitle = issue.title;
+            const issueBody = issue.body || '(no description provided)';
+
+            // ---------------------------------------------------------------
+            // Codebase context for York University IT Innovation Team Website
+            // ---------------------------------------------------------------
+            const codebaseContext = `
+            ## Codebase: York University IT Innovation Team Website
+
+            ### What this repo is
+            A static single-page marketing website for the York University IT Innovation Team.
+            No build tools, no frameworks, no package managers — vanilla HTML, CSS, and JavaScript only.
+
+            ### Tech stack
+            - Pure HTML5 (index.html — single page, all sections in one file)
+            - Vanilla CSS (css/styles.css — all styles, no preprocessor)
+            - Vanilla JavaScript (js/main.js — all interactivity)
+            - Font Awesome 6.5 loaded via CDN for icons
+            - No npm, no bundler, no transpiler — files run directly in the browser
+
+            ### File structure
+            - index.html — Single-page site, all sections in one file
+            - css/styles.css — All styles (layout, components, animations, responsive)
+            - js/main.js — All interactivity (nav toggle, scroll animations, stats counter, project filter, contact form)
+
+            ### Page sections (in order in index.html)
+            1. Header / Navbar — responsive with hamburger menu on mobile (nav-toggle, nav-menu)
+            2. Hero — headline, CTA buttons, animated icon grid (hero-shape elements)
+            3. Stats Banner — animated counters (data-target attribute drives count-up animation)
+            4. About — mission/vision cards with .reveal scroll animation
+            5. Services — 6-card grid with .reveal scroll animation
+            6. Projects — filterable grid (data-category attribute, filter buttons with data-filter)
+            7. Team — cards with avatar icons and social links
+            8. Contact — form with client-side validation (#contact-form) and success message (#form-success)
+            9. Footer — links, social icons, dynamic copyright year (#footer-year)
+
+            ### JavaScript behaviour (js/main.js)
+            - Nav toggle: hamburger button toggles nav-menu--open class on #nav-menu
+            - Scroll reveal: IntersectionObserver adds 'revealed' class to elements with .reveal class
+            - Stats counter: counts up from 0 to data-target value when stat enters viewport
+            - Project filter: clicking .filter-btn filters .project-card by data-category, toggling 'hidden' class
+            - Contact form: validates name, email (format), message; shows per-field errors via .form-error spans; shows #form-success on valid submit
+
+            ### CSS conventions
+            - BEM-style class naming: .block, .block__element, .block--modifier
+            - CSS custom properties (variables) on :root for colours, spacing, typography
+            - Mobile-first responsive — base styles for mobile, @media (min-width: ...) for larger screens
+            - Animations use transition and @keyframes — no JS-driven inline styles for animation
+            - York University brand colours: primary red #8B1538, white #FFFFFF, dark #1a1a2e
+
+            ### Conventions to always follow
+            - No external JS libraries — keep it vanilla, no jQuery, no frameworks
+            - No build step — all files must work by opening index.html directly in a browser
+            - Accessibility: all interactive elements need aria-* attributes; icons need aria-label or aria-hidden="true"
+            - New sections use: <section class="section" id="section-name"> with a .container wrapper
+            - New cards/components use .reveal class so they animate in on scroll automatically
+            - Icons come from Font Awesome — use fa-solid, fa-brands class names
+            - No inline <script> or <style> tags in HTML — all JS in js/main.js, all CSS in css/styles.css
+            `;
+
+            // ---------------------------------------------------------------
+            // Build the prompt for Claude
+            // ---------------------------------------------------------------
+            const systemPrompt = `You are a senior front-end web developer and technical analyst.
+            Your job is to take a vague GitHub issue and rewrite it as a comprehensive,
+            actionable prompt for an AI coding agent (GitHub Copilot) to implement independently.
+
+            The refined prompt must include:
+            1. A clear problem statement
+            2. The specific files to edit (index.html, css/styles.css, js/main.js) with the relevant sections
+            3. Acceptance criteria — what "done" looks like, testable and concrete
+            4. Any edge cases or gotchas (e.g. accessibility, mobile responsiveness, existing JS hooks)
+            5. Constraints to follow (conventions, patterns from the codebase — no frameworks, no inline scripts, BEM CSS, etc.)
+
+            Be specific. Reference actual class names, IDs, and file paths from the codebase context.
+            Do not add features beyond what was requested. Output only the refined prompt, no preamble.`;
+
+            const userMessage = `Codebase context:\n${codebaseContext}\n\n---\n\nOriginal issue title: ${issueTitle}\n\nOriginal issue description:\n${issueBody}\n\n---\n\nWrite the refined Copilot prompt now:`;
+
+            // ---------------------------------------------------------------
+            // Call Claude via Azure AI Foundry (Anthropic-native endpoint)
+            // ---------------------------------------------------------------
+            const response = await fetch(process.env.AZURE_AI_ENDPOINT, {
+              method: 'POST',
+              headers: {
+                'api-key': process.env.AZURE_AI_KEY,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'claude-3-5-sonnet-20241022',
+                max_tokens: 1500,
+                system: systemPrompt,
+                messages: [{ role: 'user', content: userMessage }],
+              }),
+            });
+
+            if (!response.ok) {
+              const err = await response.text();
+              core.setFailed(`Azure AI Foundry error: ${err}`);
+              return;
+            }
+
+            const data = await response.json();
+            const refinedPrompt = data.content[0].text;
+
+            // ---------------------------------------------------------------
+            // Post the refined prompt as a comment on the issue
+            // ---------------------------------------------------------------
+            const comment = `## 🤖 Copilot Prompt Coach
+
+            The following is a refined version of this issue, structured to give GitHub Copilot all the context it needs to implement a solution.
+
+            > If anything looks wrong or incomplete, edit the issue description before Copilot starts working.
+
+            ---
+
+            ${refinedPrompt}
+
+            ---
+            *Generated automatically when the \`copilot\` label was applied.*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: comment,
+            });
