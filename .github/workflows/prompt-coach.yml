@@ -18,17 +18,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
           AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
+          AZURE_AI_DEPLOYMENT: ${{ secrets.AZURE_AI_DEPLOYMENT }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           REPO_OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
         run: |
+          pip install anthropic --quiet
           python3 << 'PYEOF'
           import json
           import os
           import urllib.request
           import urllib.error
+          from anthropic import AnthropicFoundry
 
           issue_number = os.environ["ISSUE_NUMBER"]
           issue_title  = os.environ["ISSUE_TITLE"]
@@ -119,35 +122,24 @@ jobs:
           )
 
           # -------------------------------------------------------------------
-          # Call Claude via Azure AI Foundry (Anthropic-native endpoint)
-          # Auth uses 'api-key' header, body uses Anthropic's native format.
+          # Call Claude via Anthropic SDK for Azure AI Foundry
+          # The AnthropicFoundry SDK handles URL construction correctly.
+          # AZURE_AI_ENDPOINT = base URL e.g. https://xxx.services.ai.azure.com/anthropic/
+          # AZURE_AI_DEPLOYMENT = deployment name e.g. aura-claude-sonnet-4-6-useast2
           # -------------------------------------------------------------------
-          payload = {
-              "model": "aura-claude-sonnet-4-6-useast2",
-              "max_tokens": 1500,
-              "system": system_prompt,
-              "messages": [{"role": "user", "content": user_message}],
-          }
-
-          req = urllib.request.Request(
-              endpoint,
-              data=json.dumps(payload).encode("utf-8"),
-              headers={
-                  "api-key": api_key,
-                  "anthropic-version": "2023-06-01",
-                  "content-type": "application/json",
-              },
-              method="POST",
+          client = AnthropicFoundry(
+              base_url=endpoint,
+              api_key=api_key,
           )
 
-          try:
-              with urllib.request.urlopen(req) as resp:
-                  data = json.loads(resp.read().decode("utf-8"))
-          except urllib.error.HTTPError as e:
-              print(f"Azure AI Foundry error {e.code}: {e.read().decode('utf-8')}")
-              raise SystemExit(1)
+          response = client.messages.create(
+              model=os.environ["AZURE_AI_DEPLOYMENT"],
+              max_tokens=1500,
+              system=system_prompt,
+              messages=[{"role": "user", "content": user_message}],
+          )
 
-          refined_prompt = data["content"][0]["text"]
+          refined_prompt = response.content[0].text
 
           # -------------------------------------------------------------------
           # Post the refined prompt as a comment on the issue
